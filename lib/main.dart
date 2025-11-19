@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'dart:io' show Platform;
 import 'package:geolocator/geolocator.dart';
+import 'package:latlong2/latlong.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:vector_math/vector_math_64.dart' as vector;
 import 'dart:async';
@@ -38,7 +40,7 @@ class _GpsFusionScreenState extends State<GpsFusionScreen> {
   // --- Controllers and Subscriptions ---
   StreamSubscription<Position>? _positionStreamSubscription;
 
-  // ADDED: MethodChannel for native AR communication
+  // MethodChannel for native AR communication
   static const _arChannel = MethodChannel(
     'com.example.flutter_high_accuracy_gps_app/ar',
   );
@@ -54,6 +56,10 @@ class _GpsFusionScreenState extends State<GpsFusionScreen> {
   late KalmanFilter _kalmanFilter;
   bool _isKalmanInitialized = false;
   bool _permissionsGranted = false;
+
+  // --- Map Variables ---
+  final MapController _mapController = MapController();
+  final List<LatLng> _pathHistory = [];
 
   @override
   void initState() {
@@ -142,6 +148,10 @@ class _GpsFusionScreenState extends State<GpsFusionScreen> {
               accuracy: position.accuracy,
             );
             final state = _kalmanFilter.getState();
+
+            // Update path
+            _updatePathAndMap(state[0], state[2]);
+
             setState(() {
               _fusedPosition = KalmanPosition(state[0], state[2]);
             });
@@ -184,6 +194,10 @@ class _GpsFusionScreenState extends State<GpsFusionScreen> {
         // Use this change in position to PREDICT our next state
         _kalmanFilter.predict(deltaNorth: deltaNorth, deltaEast: deltaEast);
         final state = _kalmanFilter.getState();
+
+        // Update path
+        _updatePathAndMap(state[0], state[2]);
+
         setState(() {
           _fusedPosition = KalmanPosition(state[0], state[2]);
         });
@@ -206,74 +220,107 @@ class _GpsFusionScreenState extends State<GpsFusionScreen> {
     }
   }
 
+  // Helper to update path and map center
+  void _updatePathAndMap(double lat, double lon) {
+    final newPoint = LatLng(lat, lon);
+
+    _pathHistory.add(newPoint);
+
+    // Optional: Limit path history to last 500 points to save memory
+    if (_pathHistory.length > 1000) {
+      _pathHistory.removeAt(0);
+    }
+
+    // Move the map camera to follow the user
+    _mapController.move(newPoint, 18.0);
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('Sensor Fusion GPS')),
       body: Column(
         children: [
+          // Top Half: AR View (Camera)
           Expanded(flex: 2, child: _buildArView()),
+
+          // Bottom Half: Map with Path
           Expanded(
             flex: 3,
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _buildStatusCard(),
-                  const SizedBox(height: 16),
-                  _buildInfoCard("Raw GPS", [
-                    _buildInfoRow(
-                      "Latitude:",
-                      _rawGpsPosition?.latitude.toStringAsFixed(7) ?? "N/A",
-                    ),
-                    _buildInfoRow(
-                      "Longitude:",
-                      _rawGpsPosition?.longitude.toStringAsFixed(7) ?? "N/A",
-                    ),
-                    _buildInfoRow(
-                      "Accuracy:",
-                      "${_rawGpsPosition?.accuracy.toStringAsFixed(2) ?? "N/A"} m",
-                    ),
-                    _buildInfoRow(
-                      "Speed:",
-                      "${_rawGpsPosition?.speed.toStringAsFixed(2) ?? "N/A"} m/s",
-                    ),
-                  ]),
-                  const SizedBox(height: 16),
-                  _buildInfoCard("ARCore Odometry", [
-                    _buildInfoRow(
-                      "Relative X:",
-                      _arPosition?.x.toStringAsFixed(3) ?? "N/A",
-                    ),
-                    _buildInfoRow(
-                      "Relative Y:",
-                      _arPosition?.y.toStringAsFixed(3) ?? "N/A",
-                    ),
-                    _buildInfoRow(
-                      "Relative Z:",
-                      _arPosition?.z.toStringAsFixed(3) ?? "N/A",
-                    ),
-                  ]),
-                  const SizedBox(height: 16),
-                  _buildInfoCard(
-                    "Fused Position (Kalman Filter)",
-                    [
-                      _buildInfoRow(
-                        "Latitude:",
-                        _fusedPosition?.latitude.toStringAsFixed(7) ?? "N/A",
-                        isHighlighted: true,
-                      ),
-                      _buildInfoRow(
-                        "Longitude:",
-                        _fusedPosition?.longitude.toStringAsFixed(7) ?? "N/A",
-                        isHighlighted: true,
-                      ),
-                    ],
-                    cardColor: Colors.deepPurple.shade50,
+            child: Stack(
+              children: [
+                FlutterMap(
+                  mapController: _mapController,
+                  options: MapOptions(
+                    // Initialize center (default to 0,0 if not ready)
+                    initialCenter: _fusedPosition != null
+                        ? LatLng(
+                            _fusedPosition!.latitude,
+                            _fusedPosition!.longitude,
+                          )
+                        : const LatLng(0, 0),
+                    initialZoom: 18.0,
                   ),
-                ],
-              ),
+                  children: [
+                    TileLayer(
+                      urlTemplate:
+                          'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                      userAgentPackageName:
+                          'com.example.flutter_gps_ar_fusion_app',
+                    ),
+                    // The Blue Line (Fused Path)
+                    PolylineLayer(
+                      polylines: [
+                        Polyline(
+                          points: _pathHistory,
+                          strokeWidth: 4.0,
+                          color: Colors.blue,
+                        ),
+                      ],
+                    ),
+                    // The Current Position Marker (Red Dot)
+                    if (_fusedPosition != null)
+                      MarkerLayer(
+                        markers: [
+                          Marker(
+                            point: LatLng(
+                              _fusedPosition!.latitude,
+                              _fusedPosition!.longitude,
+                            ),
+                            width: 20,
+                            height: 20,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: Colors.red,
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: Colors.white,
+                                  width: 2,
+                                ),
+                                boxShadow: const [
+                                  BoxShadow(
+                                    blurRadius: 5,
+                                    color: Colors.black26,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+
+                // Overlay the status card on top of the map
+                Positioned(
+                  top: 10,
+                  left: 10,
+                  right: 10,
+                  child: _buildStatusCard(),
+                ),
+
+                // Optional: Toggle to show stats logic could go here
+              ],
             ),
           ),
         ],

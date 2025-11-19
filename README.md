@@ -6,11 +6,17 @@ A Flutter application designed to achieve centimeter-level relative precision an
 
 This project uses a custom Kalman Filter to bridge the gap between slow, noisy satellite updates with high-frequency visual tracking data. This results in a **jitter-free** and **continuous path**.
 
+The application now visualizes this "jitter-free" path on an interactive map.
+
 note: the **absolute global position** will still have an error of several meters
 
 ## 🚀 Features
 
 * **Sensor Fusion:** Combines absolute positioning (GPS) with precise relative tracking (ARCore VIO).
+
+* **Interactive Map Visualization:** Uses `flutter_map` (OpenStreetMap) to draw the user's path in real-time.
+    * **Blue Line:** Represents the smooth, fused trajectory.
+    * **Red Marker:** Represents the current estimated position.
 
 * **Custom Kalman Filter:** Implements a 4-state Kalman filter (Latitude, Longitude, Velocity North, Velocity East) to merge data sources intelligently.
 
@@ -28,16 +34,19 @@ The app operates using a Predict-Update cycle:
     * The native Android layer captures the camera's motion using ARCore's `TrackingState` and `Pose`.
     * This relative movement (*x*, *y*, *z*) is sent to Flutter via `MethodChannel`.
     * The Kalman Filter **predicts** the new geolocation based on this visual displacement.
+    * The map polyline extends immediately, providing smooth visual feedback.
 
 2. **Update (Lower Frequency):**
     * The `geolocator` plugin provides absolute GPS coordinates.
     * The Kalman Filter **updates** (corrects) the predicted state based on the GPS reading and its accuracy confidence.
+    * The map trajectory is "corrected" to align with the absolute coordinates.
 
 ## 📦 Tech Stack
 * **Frontend:** Flutter (Dart)
 * **Native Module:** Kotlin (Android)
 * **AR Engine:** Google ARCore SDK (via `GLSurfaceView` and custom Renderer) 
-* **Math:** `vector_math_64` for matrix operations in the filter 
+* **Mapping:** `flutter_map` with OpenStreetMap tiles
+* **Math:** `vector_math_64` (Matrix operations), `latlong2` (Geospatial calculations)
 * **Plugins:**
     * `geolocator`
     * `permission_handler`
@@ -73,17 +82,14 @@ Note: This project currently supports **Android only**. The iOS implementation i
 
 1. **Grant Permissions:** Upon launch, accept the prompts for **Camera** (required for AR tracking) and **Location** (required for GPS).
 
-2. **Wait for Initialization:**
-    * **Step 1:** The app waits for a high-accuracy GPS fix (< 20m accuracy) to initialize the Kalman Filter.
-    * **Step 2:** Once GPS is locked, the AR session starts.
-
-3. **Tracking:**
-
+2.  **Initialization:**
+    * The app waits for a high-accuracy GPS fix (< 20m accuracy) to initialize the Kalman Filter. 
+    * Once locked, the map will center on your location and the AR session will begin.
+    
+3.  **Tracking:**
     * Walk normally holding the phone up (camera unblocked).
-
-    * The **"Fused Position"** card will update smoothly as you move, even if the GPS signal lags or jitters.
-
-    * Status indicators will show "AR Tracking Active" when fusion is working.
+    * Watch the **Blue Polyline** on the map. It will draw smoothly in real-time as you walk.
+    * If the AR tracking drifts, the line will gently correct itself when the next high-quality GPS point arrives.
 
 ## 📂 Project Structure
 
