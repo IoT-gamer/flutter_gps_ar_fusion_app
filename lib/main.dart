@@ -51,6 +51,7 @@ class _GpsFusionScreenState extends State<GpsFusionScreen> {
   vector.Vector3? _arPosition; // Relative position from ARCore
   vector.Vector3? _lastArPosition;
   KalmanPosition? _fusedPosition;
+  double _arTrustLevel = 0.5;
 
   // --- Kalman Filter ---
   late KalmanFilter _kalmanFilter;
@@ -235,6 +236,48 @@ class _GpsFusionScreenState extends State<GpsFusionScreen> {
     _mapController.move(newPoint, 18.0);
   }
 
+  // Build the slider widget
+  Widget _buildTrustSlider() {
+    return Card(
+      elevation: 4,
+      margin: const EdgeInsets.all(12),
+      child: Padding(
+        padding: const EdgeInsets.all(8.0),
+        child: Column(
+          children: [
+            const Text(
+              "Fusion Balance",
+              style: TextStyle(fontWeight: FontWeight.bold),
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: const [
+                Text("Trust GPS", style: TextStyle(fontSize: 12)),
+                Text("Trust AR", style: TextStyle(fontSize: 12)),
+              ],
+            ),
+            Slider(
+              value: _arTrustLevel,
+              min: 0.0,
+              max: 1.0,
+              divisions: 10,
+              label: _arTrustLevel.toStringAsFixed(1),
+              onChanged: (value) {
+                setState(() {
+                  _arTrustLevel = value;
+                  // Update the filter immediately
+                  if (_isKalmanInitialized) {
+                    _kalmanFilter.setTrustLevel(value);
+                  }
+                });
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -320,6 +363,12 @@ class _GpsFusionScreenState extends State<GpsFusionScreen> {
                 ),
 
                 // Optional: Toggle to show stats logic could go here
+                Positioned(
+                  bottom: 20,
+                  left: 20,
+                  right: 20,
+                  child: _buildTrustSlider(),
+                ),
               ],
             ),
           ),
@@ -529,6 +578,30 @@ class KalmanFilter {
     0,
     0,
   )..transpose(); // We only measure position (lat, lon), not velocity.
+
+  // Method to tune trust dynamically
+  // sliderValue: 0.0 (Trust GPS) to 1.0 (Trust AR)
+  void setTrustLevel(double sliderValue) {
+    // Invert logic: Higher trust in AR = LOWER noise (Q)
+    // Range:
+    // slider 0.0 -> noise 1.0 (High noise, filter follows GPS loosely)
+    // slider 1.0 -> noise 0.001 (Low noise, filter sticks to AR path)
+
+    double baseNoise = (1.0 - sliderValue);
+    // Clamp to avoid singular matrix issues (cannot be exactly 0)
+    if (baseNoise < 0.001) baseNoise = 0.001;
+
+    // Apply to the Q matrix diagonal
+    _q.setIdentity();
+
+    // Position noise (lat/lon)
+    _q[0] = baseNoise;
+    _q[10] = baseNoise;
+
+    // Velocity noise (usually higher than position)
+    _q[5] = baseNoise * 5.0;
+    _q[15] = baseNoise * 5.0;
+  }
 
   void initialize({
     required double lat,

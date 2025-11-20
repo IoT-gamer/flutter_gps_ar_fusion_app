@@ -14,6 +14,10 @@ note: the **absolute global position** will still have an error of several meter
 
 * **Sensor Fusion:** Combines absolute positioning (GPS) with precise relative tracking (ARCore VIO).
 
+* **Real-time Tuning:** Includes a **"Fusion Balance" slider** to dynamically adjust the Kalman Filter's trust:
+    * **Trust GPS:** Rely more on satellite data (fixes drift, but adds jitter).
+    * **Trust AR:** Rely more on visual odometry (smooth path, but susceptible to drift).
+
 * **Interactive Map Visualization:** Uses `flutter_map` (OpenStreetMap) to draw the user's path in real-time.
     * **Blue Line:** Represents the smooth, fused trajectory.
     * **Red Marker:** Represents the current estimated position.
@@ -47,10 +51,7 @@ The app operates using a Predict-Update cycle:
 * **AR Engine:** Google ARCore SDK (via `GLSurfaceView` and custom Renderer) 
 * **Mapping:** `flutter_map` with OpenStreetMap tiles
 * **Math:** `vector_math_64` (Matrix operations), `latlong2` (Geospatial calculations)
-* **Plugins:**
-    * `geolocator`
-    * `permission_handler`
-    * `vector_math`
+* **Location:** `geolocator` plugin for GPS data
 
 ## 📋 Prerequisites
 * **Hardware:** An Android device that supports **Google ARCore** (Google Play Services for AR).
@@ -90,6 +91,10 @@ Note: This project currently supports **Android only**. The iOS implementation i
     * Walk normally holding the phone up (camera unblocked).
     * Watch the **Blue Polyline** on the map. It will draw smoothly in real-time as you walk.
     * If the AR tracking drifts, the line will gently correct itself when the next high-quality GPS point arrives.
+
+4. **Tuning:** Use the slider at the bottom of the screen:
+    * **Slide Left (Trust GPS):** Use this if the blue line is drifting through buildings. The path will snap to the raw GPS points.
+    * **Slide Right (Trust AR):** Use this if the GPS is jittering wildly. The path will become very smooth but may drift over long distances.
 
 ## 📂 Project Structure
 
