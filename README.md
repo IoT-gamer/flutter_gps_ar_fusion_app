@@ -2,13 +2,16 @@
 
 ![Work in Progress](https://img.shields.io/badge/status-work%20in%20progress-yellow)
 
-A Flutter application designed to achieve centimeter-level relative precision and trajectory smoothness by fusing **GNSS (Global Navigation Satellite System)** data with **Visual Inertial Odometry (VIO)** from Google ARCore.
+A Flutter application designed to achieve centimeter-level relative precision and trajectory smoothness by fusing **GNSS (Global Navigation Satellite System)** data with **Visual Inertial Odometry (VIO)** from Google ARCore and **Magnetic Heading**
 
 This project uses a custom Kalman Filter to bridge the gap between slow, noisy satellite updates with high-frequency visual tracking data. This results in a **jitter-free** and **continuous path**.
 
 The application now visualizes this "jitter-free" path on an interactive map.
 
 note: the **absolute global position** will still have an error of several meters
+
+## 📷 Screenshots
+<img src="docs/images/demo1.jpg" alt="drawing" height="300"/>
 
 ## 🚀 Features
 
