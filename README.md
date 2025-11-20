@@ -12,11 +12,16 @@ note: the **absolute global position** will still have an error of several meter
 
 ## 🚀 Features
 
-* **Sensor Fusion:** Combines absolute positioning (GPS) with precise relative tracking (ARCore VIO).
+* **Sensor Fusion:** Combines three distinct data sources:
+    * **GPS:** Absolute Position (Lat/Lon).
+    * **ARCore:** Precise relative distance (Visual Odometry).
+    * **Magnetometer:** Real-time True North heading
 
 * **Real-time Tuning:** Includes a **"Fusion Balance" slider** to dynamically adjust the Kalman Filter's trust:
     * **Trust GPS:** Rely more on satellite data (fixes drift, but adds jitter).
     * **Trust AR:** Rely more on visual odometry (smooth path, but susceptible to drift).
+
+* **Visual Dead Reckoning:** Solves the "AR Drift" direction problem by using AR for *distance* and the Compass for *direction*.
 
 * **Interactive Map Visualization:** Uses `flutter_map` (OpenStreetMap) to draw the user's path in real-time.
     * **Blue Line:** Represents the smooth, fused trajectory.
@@ -34,11 +39,10 @@ note: the **absolute global position** will still have an error of several meter
 
 The app operates using a Predict-Update cycle:
 
-1. **Prediction (High Frequency):**
-    * The native Android layer captures the camera's motion using ARCore's `TrackingState` and `Pose`.
-    * This relative movement (*x*, *y*, *z*) is sent to Flutter via `MethodChannel`.
-    * The Kalman Filter **predicts** the new geolocation based on this visual displacement.
-    * The map polyline extends immediately, providing smooth visual feedback.
+1.  **Prediction (High Frequency):**
+    * **Distance:** The native Android layer captures camera motion (`TrackingState` and `Pose`) and sends the relative delta to Flutter.
+    * **Direction:** `flutter_compass` provides the device's absolute bearing (True North).
+    * **Logic:** The Kalman Filter projects the AR distance along the Compass heading to predict the new coordinate.
 
 2. **Update (Lower Frequency):**
     * The `geolocator` plugin provides absolute GPS coordinates.
@@ -49,9 +53,9 @@ The app operates using a Predict-Update cycle:
 * **Frontend:** Flutter (Dart)
 * **Native Module:** Kotlin (Android)
 * **AR Engine:** Google ARCore SDK (via `GLSurfaceView` and custom Renderer) 
-* **Mapping:** `flutter_map` with OpenStreetMap tiles
-* **Math:** `vector_math_64` (Matrix operations), `latlong2` (Geospatial calculations)
-* **Location:** `geolocator` plugin for GPS data
+* **Mapping:** `flutter_map` & `latlong2`
+* **Sensors:** `flutter_compass` (Magnetometer), `geolocator` (GNSS)
+* **Math:** `vector_math_64`
 
 ## 📋 Prerequisites
 * **Hardware:** An Android device that supports **Google ARCore** (Google Play Services for AR).
@@ -87,10 +91,10 @@ Note: This project currently supports **Android only**. The iOS implementation i
     * The app waits for a high-accuracy GPS fix (< 20m accuracy) to initialize the Kalman Filter. 
     * Once locked, the map will center on your location and the AR session will begin.
     
-3.  **Tracking:**
-    * Walk normally holding the phone up (camera unblocked).
-    * Watch the **Blue Polyline** on the map. It will draw smoothly in real-time as you walk.
-    * If the AR tracking drifts, the line will gently correct itself when the next high-quality GPS point arrives.
+3.  **Tracking:** Walk normally holding the phone up.
+    * The **Magnetometer** aligns your movement to the map.
+    * **ARCore** provides the smooth distance.
+    * **GPS** prevents long-term drift.
 
 4. **Tuning:** Use the slider at the bottom of the screen:
     * **Slide Left (Trust GPS):** Use this if the blue line is drifting through buildings. The path will snap to the raw GPS points.
@@ -111,9 +115,10 @@ android/
 ```
 
 ## ⚠️ Known Limitations
-**Drift:** Pure visual odometry drifts over time. This is mitigated by the GPS updates in the Kalman Filter, but prolonged operation without GPS (e.g., tunnels) will eventually drift.
 
-**Initialization:** The app currently blocks visualization until a "Good" GPS fix is found. If testing indoors, you may need to temporarily bypass the `!_isKalmanInitialized` check in `main.dart`.
+* **Magnetic Interference:** The compass can be affected by large metal objects (cars, steel beams), causing the path to temporarily skew.
+* **Drift:** Pure visual odometry drifts over time. Prolonged operation without good GPS will eventually cause the path to deviate.
+* **Initialization:** The app blocks visualization until a "Good" GPS fix is found.
 
 ## 🤝 Contributing
 Contributions are welcome! Please feel free to submit a Pull Request.

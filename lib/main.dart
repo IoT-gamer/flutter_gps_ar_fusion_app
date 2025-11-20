@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_compass/flutter_compass.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'dart:io' show Platform;
 import 'package:geolocator/geolocator.dart';
@@ -62,6 +63,10 @@ class _GpsFusionScreenState extends State<GpsFusionScreen> {
   final MapController _mapController = MapController();
   final List<LatLng> _pathHistory = [];
 
+  // --- Compass Variables ---
+  double _currentHeading = 0.0;
+  StreamSubscription<CompassEvent>? _compassSubscription;
+
   @override
   void initState() {
     super.initState();
@@ -69,17 +74,26 @@ class _GpsFusionScreenState extends State<GpsFusionScreen> {
   }
 
   Future<void> _initializeServices() async {
-    // 1. Request Permissions
+    // Request Permissions
     await _requestPermissions();
 
-    // 2. Initialize Kalman Filter (will be re-initialized on first GPS fix)
+    // Initialize Kalman Filter (will be re-initialized on first GPS fix)
     _kalmanFilter = KalmanFilter();
 
-    // 3. Start listening to GPS updates
+    // Start listening to GPS updates
     _startGpsUpdates();
 
-    // 5. ADDED: Set up the MethodChannel handler
+    // Set up the MethodChannel handler
     _arChannel.setMethodCallHandler(_onPlatformChannelMessage);
+
+    // Start Compass Listener
+    _compassSubscription = FlutterCompass.events?.listen((event) {
+      if (event.heading != null) {
+        setState(() {
+          _currentHeading = event.heading!;
+        });
+      }
+    });
   }
 
   Future<void> _requestPermissions() async {
@@ -184,15 +198,29 @@ class _GpsFusionScreenState extends State<GpsFusionScreen> {
       });
 
       if (_lastArPosition != null) {
-        // This logic is identical to the old _onArCoreUpdate
-        final delta = currentArPosition - _lastArPosition!;
-        // We assume a simple flat earth model for local movement.
-        // Y is typically 'up' in ARCore, so we use X and Z for horizontal movement.
-        // IMPORTANT: ARCore's Z-axis is negative "forward"
-        final deltaNorth = -delta.z;
-        final deltaEast = delta.x;
+        // Calculate the distance moved (Magnitude)
+        // We trust ARCore fully for "How far did I move?"
+        final distanceMoved = _arPosition!.distanceTo(_lastArPosition!);
 
-        // Use this change in position to PREDICT our next state
+        // Use Compass for "Which way did I move?"
+        // Convert degrees to radians.
+        // Note: Compass heading 0 is North, 90 is East.
+        // Standard Math uses 0 as East (X-axis).
+        // We need to convert compass (Azimuth) to standard math angle.
+        // Math Angle = (90 - Heading) in degrees, then to radians.
+        // OR simply:
+        // North = distance * cos(radians)
+        // East = distance * sin(radians)
+
+        // Adjust for standard "0 is North" usage in Geography:
+        double headingRad = (pi / 180.0) * _currentHeading;
+
+        // Calculate components based on Real World Heading
+        // North is +Y in local tangent plane, East is +X
+        final deltaNorth = distanceMoved * cos(headingRad);
+        final deltaEast = distanceMoved * sin(headingRad);
+
+        // Feed to Kalman Filter
         _kalmanFilter.predict(deltaNorth: deltaNorth, deltaEast: deltaEast);
         final state = _kalmanFilter.getState();
 
@@ -507,6 +535,7 @@ class _GpsFusionScreenState extends State<GpsFusionScreen> {
   @override
   void dispose() {
     _positionStreamSubscription?.cancel();
+    _compassSubscription?.cancel();
     super.dispose();
   }
 }
