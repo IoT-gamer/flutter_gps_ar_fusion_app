@@ -11,9 +11,13 @@ import android.util.Log
 import android.view.View
 import androidx.core.content.ContextCompat
 import com.google.ar.core.ArCoreApk
+import com.google.ar.core.Earth
 import com.google.ar.core.Config
+import com.google.ar.core.GeospatialPose
 import com.google.ar.core.Session
 import com.google.ar.core.TrackingState
+import com.google.ar.core.VpsAvailability
+import com.google.ar.core.VpsAvailabilityFuture
 import com.google.ar.core.exceptions.CameraNotAvailableException
 import com.google.ar.core.exceptions.UnavailableApkTooOldException
 import com.google.ar.core.exceptions.UnavailableArcoreNotInstalledException
@@ -26,6 +30,9 @@ import io.flutter.plugin.platform.PlatformView
 import java.util.concurrent.atomic.AtomicBoolean
 import javax.microedition.khronos.egl.EGLConfig
 import javax.microedition.khronos.opengles.GL10
+
+
+import java.util.function.Consumer
 
 /**
  * The actual PlatformView that Flutter will display.
@@ -49,6 +56,21 @@ class ArCoreView(
     private val arInitialized = AtomicBoolean(false)
 
     init {
+        methodChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
+                "refinePosition" -> {
+                    val lat = call.argument<Double>("latitude")
+                    val lng = call.argument<Double>("longitude")
+                    if (lat != null && lng != null) {
+                        // Delegate to the renderer which holds the active session
+                        glSurfaceView.renderer.checkAndRefineLocation(lat, lng, result)
+                    } else {
+                        result.error("INVALID_ARGS", "Missing lat/lng", null)
+                    }
+                }
+                else -> result.notImplemented()
+            }
+        }
         // Check for ARCore availability and permissions *before* setting up the view.
         // This is a good place to do it, as the view is being created.
         if (checkArCoreAndPermissions()) {
@@ -220,6 +242,11 @@ class MyArRenderer(
                 val config = Config(it)
                 // Use LATEST_CAMERA_IMAGE for responsiveness
                 config.updateMode = Config.UpdateMode.LATEST_CAMERA_IMAGE
+
+                if (it.isGeospatialModeSupported(Config.GeospatialMode.ENABLED)) {
+                    config.geospatialMode = Config.GeospatialMode.ENABLED
+                }                
+
                 it.configure(config)
                 it.resume()
                 Log.i("MyArRenderer", "ARCore session resumed.")
@@ -308,4 +335,40 @@ class MyArRenderer(
             Log.e("MyArRenderer", "Exception during onDrawFrame", e)
         }
     }
+
+    fun checkAndRefineLocation(lat: Double, lng: Double, result: MethodChannel.Result) {
+        val localSession = session ?: return result.error("NO_SESSION", "AR Session is null", null)
+
+        // Check availability asynchronously
+        val future = localSession.checkVpsAvailabilityAsync(
+            lat,
+            lng,
+            Consumer { availability ->
+                // This runs on the main thread
+                if (availability != VpsAvailability.AVAILABLE) {
+                    result.error("VPS_UNAVAILABLE", "VPS is not available at this location ($availability)", null)
+                    return@Consumer
+                }
+
+                // VPS is available, now check if we are tracking
+                val earth = localSession.earth
+                if (earth?.trackingState == com.google.ar.core.TrackingState.TRACKING) {
+                    val pose = earth.cameraGeospatialPose
+                    
+                    // Optional: Enforce high accuracy before accepting
+                    // if (pose.horizontalAccuracy > 5.0) { ... }
+
+                    val response = mapOf(
+                        "latitude" to pose.latitude,
+                        "longitude" to pose.longitude,
+                        "heading" to pose.heading,
+                        "accuracy" to pose.horizontalAccuracy
+                    )
+                    result.success(response)
+                } else {
+                    result.error("NOT_TRACKING", "VPS available, but camera not yet localized. Look around buildings.", null)
+                }
+            }
+        )
+    }    
 }

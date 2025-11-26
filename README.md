@@ -6,9 +6,10 @@ A Flutter application designed to achieve centimeter-level relative precision an
 
 This project uses a custom Kalman Filter to bridge the gap between slow, noisy satellite updates with high-frequency visual tracking data. This results in a **jitter-free** and **continuous path**.
 
-The application now visualizes this "jitter-free" path on an interactive map.
+The application visualizes this "jitter-free" path on an interactive map.
 
-note: the **absolute global position** will still have an error of several meters
+This project now includes **Google ARCore Geospatial API** integration, allowing for global localization (VPS) to correct drift using Google Street View data.
+
 
 ## 📷 Screenshots
 <img src="docs/images/demo1.jpg" alt="drawing" height="300"/>
@@ -19,12 +20,15 @@ note: the **absolute global position** will still have an error of several meter
     * **GPS:** Absolute Position (Lat/Lon).
     * **ARCore:** Precise relative distance (Visual Odometry).
     * **Magnetometer:** Real-time True North heading
+    * **VPS:**  High-precision global localization.
+
+* **Geospatial Alignment (VPS):**
+    * **Refine Location:** One-click check to localize against Google Earth data.
+    * **Drift Correction:** Instantly snaps the user's location to the correct spot with <1m accuracy if visual features are available.
 
 * **Real-time Tuning:** Includes a **"Fusion Balance" slider** to dynamically adjust the Kalman Filter's trust:
     * **Trust GPS:** Rely more on satellite data (fixes drift, but adds jitter).
     * **Trust AR:** Rely more on visual odometry (smooth path, but susceptible to drift).
-
-* **Visual Dead Reckoning:** Solves the "AR Drift" direction problem by using AR for *distance* and the Compass for *direction*.
 
 * **Interactive Map Visualization:** Uses `flutter_map` (OpenStreetMap) to draw the user's path in real-time.
     * **Blue Line:** Represents the smooth, fused trajectory.
@@ -32,7 +36,7 @@ note: the **absolute global position** will still have an error of several meter
 
 * **Custom Kalman Filter:** Implements a 4-state Kalman filter (Latitude, Longitude, Velocity North, Velocity East) to merge data sources intelligently.
 
-* **Native ARCore Integration:** Uses a custom Android Platform View (`ArCoreView`) written in Kotlin to extract raw pose data directly from the AR session.
+* **Native ARCore Integration:** Uses a custom Android Platform View (`ArCoreView`) enabling `GeospatialMode` for advanced tracking.
 
 * **Real-time Dashboard:** Displays raw GPS data, AR relative displacement, and the final fused coordinates side-by-side.
 
@@ -48,14 +52,13 @@ The app operates using a Predict-Update cycle:
     * **Logic:** The Kalman Filter projects the AR distance along the Compass heading to predict the new coordinate.
 
 2. **Update (Lower Frequency):**
-    * The `geolocator` plugin provides absolute GPS coordinates.
-    * The Kalman Filter **updates** (corrects) the predicted state based on the GPS reading and its accuracy confidence.
-    * The map trajectory is "corrected" to align with the absolute coordinates.
+    * **GPS:** The `geolocator` plugin provides absolute GPS coordinates to correct the predicted state.
+    * **VPS (On Demand):** The user triggers a "Refine" action. The app queries the ARCore Geospatial API. If the camera recognizes the surroundings (via Street View), the Kalman Filter is hard-reset to this high-accuracy position.
 
 ## 📦 Tech Stack
 * **Frontend:** Flutter (Dart)
 * **Native Module:** Kotlin (Android)
-* **AR Engine:** Google ARCore SDK (via `GLSurfaceView` and custom Renderer) 
+* **AR Engine:** Google ARCore SDK (via `GLSurfaceView` and custom Renderer and Geospatial API enabled)
 * **Mapping:** `flutter_map` & `latlong2`
 * **Sensors:** `flutter_compass` (Magnetometer), `geolocator` (GNSS)
 * **Math:** `vector_math_64`
@@ -75,11 +78,24 @@ Note: This project currently supports **Android only**. The iOS implementation i
     cd flutter_gps_ar_fusion_app
    ```
 
-2. **Install dependencies:**
+2. **Configure API Key:**
+
+    * Required for VPS functionality option.
+
+    * [Add your Google Cloud API Key with ARCore API enabled](https://developers.google.com/ar/develop/java/geospatial/enable#enable_the_arcore_api) to your `AndroidManifest.xml`.
+    * for testing, you can add it directly inside the `<application>` tag: 
+    ```xml
+    <meta-data
+    android:name="com.google.android.ar.API_KEY"
+    android:value="your key here" />
+    ```
+    * Or follow other secure methods to store API keys.
+
+3. **Install dependencies:**
     ```bash
     flutter pub get
     ```
-3. **Run on a physical device:**
+4. **Run on a physical device:**
     * Connect your ARCore-supported Android device via USB.
     * Ensure "Developer Options" and "USB Debugging" are enabled.
     ```bash
@@ -88,18 +104,15 @@ Note: This project currently supports **Android only**. The iOS implementation i
 
 ## 📱 Usage
 
-1. **Grant Permissions:** Upon launch, accept the prompts for **Camera** (required for AR tracking) and **Location** (required for GPS).
+1. **Grant Permissions:** Accept Camera (AR), Location, and Internet permissions.
 
-2.  **Initialization:**
-    * The app waits for a high-accuracy GPS fix (< 20m accuracy) to initialize the Kalman Filter. 
-    * Once locked, the map will center on your location and the AR session will begin.
+2. **Initialization:** Wait for a GPS fix to initialize the map center.
     
-3.  **Tracking:** Walk normally holding the phone up.
-    * The **Magnetometer** aligns your movement to the map.
-    * **ARCore** provides the smooth distance.
-    * **GPS** prevents long-term drift.
+3. **Tracking:** Walk normally. The path will be smooth (AR) but geographically approximate (GPS).
 
-4. **Tuning:** Use the slider at the bottom of the screen:
+4. **Refine (VPS):** If you notice the map path is offset from reality, press the **Refine/Explore** button.
+
+5.  **Tuning:** Use the slider at the bottom of the screen:
     * **Slide Left (Trust GPS):** Use this if the blue line is drifting through buildings. The path will snap to the raw GPS points.
     * **Slide Right (Trust AR):** Use this if the GPS is jittering wildly. The path will become very smooth but may drift over long distances.
 
@@ -119,9 +132,11 @@ android/
 
 ## ⚠️ Known Limitations
 
+* **VPS Availability:** VPS only works in areas covered by Google Street View. Indoor support is limited.
+* **Data Usage:** Checking VPS availability consumes mobile data.
+* **Quota & Cost:** The Geospatial API has free tier limits. Exceeding these may incur costs or limit usage. Monitor your usage in the Google Cloud Console.
 * **Magnetic Interference:** The compass can be affected by large metal objects (cars, steel beams), causing the path to temporarily skew.
-* **Drift:** Pure visual odometry drifts over time. Prolonged operation without good GPS will eventually cause the path to deviate.
-* **Initialization:** The app blocks visualization until a "Good" GPS fix is found.
+* **Behavior:** VPS works best when the user points the camera at buildings or distinct skylines, whereas VIO tracking works best looking at the ground.
 
 ## 🤝 Contributing
 Contributions are welcome! Please feel free to submit a Pull Request.

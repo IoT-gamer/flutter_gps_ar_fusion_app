@@ -53,6 +53,7 @@ class _GpsFusionScreenState extends State<GpsFusionScreen> {
   vector.Vector3? _lastArPosition;
   KalmanPosition? _fusedPosition;
   double _arTrustLevel = 0.5;
+  bool _isRefining = false;
 
   // --- Kalman Filter ---
   late KalmanFilter _kalmanFilter;
@@ -172,6 +173,66 @@ class _GpsFusionScreenState extends State<GpsFusionScreen> {
             });
           }
         });
+  }
+
+  Future<void> _refineWithVps() async {
+    if (_fusedPosition == null) return;
+
+    setState(() => _isRefining = true);
+
+    try {
+      // 1. Invoke the native method
+      final result = await _arChannel
+          .invokeMapMethod<String, dynamic>('refinePosition', {
+            'latitude': _fusedPosition!.latitude,
+            'longitude': _fusedPosition!.longitude,
+          });
+
+      if (result != null) {
+        final double newLat = result['latitude'];
+        final double newLon = result['longitude'];
+        final double accuracy = result['accuracy'];
+
+        setState(() {
+          _arStatus = "VPS Locked! Accuracy: ${accuracy.toStringAsFixed(1)}m";
+
+          // 2. Hard Reset the Kalman Filter with the high-precision VPS data
+          _kalmanFilter.initialize(
+            lat: newLat,
+            lon: newLon,
+            accuracy: accuracy < 2.0 ? 0.5 : accuracy, // Trust VPS highly
+          );
+
+          _fusedPosition = KalmanPosition(newLat, newLon);
+
+          // Visual feedback on map
+          _mapController.move(LatLng(newLat, newLon), 19.0);
+        });
+
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              "Updated Position via VPS (Acc: ${accuracy.toStringAsFixed(1)}m)",
+            ),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } on PlatformException catch (e) {
+      setState(() {
+        _arStatus = "VPS Error: ${e.message}";
+      });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("VPS Failed: ${e.message}"),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      setState(() => _isRefining = false);
+    }
   }
 
   // This function now handles pose updates from the native side
@@ -396,6 +457,17 @@ class _GpsFusionScreenState extends State<GpsFusionScreen> {
                   left: 20,
                   right: 20,
                   child: _buildTrustSlider(),
+                ),
+                Positioned(
+                  bottom: 100, // Position above the slider
+                  right: 20,
+                  child: FloatingActionButton(
+                    onPressed: _isRefining ? null : _refineWithVps,
+                    backgroundColor: Colors.blueAccent,
+                    child: _isRefining
+                        ? const CircularProgressIndicator(color: Colors.white)
+                        : const Icon(Icons.travel_explore),
+                  ),
                 ),
               ],
             ),

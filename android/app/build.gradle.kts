@@ -45,4 +45,5 @@ flutter {
 
 dependencies {
     implementation("com.google.ar:core:1.51.0")
+    implementation("com.google.android.gms:play-services-location:21.3.0")
 }
